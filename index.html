@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Serial COM Port Web Interface</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            text-align: center;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 16px;
+        }
+        #output {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            height: 200px;
+            overflow-y: scroll;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <h1>Serial COM Port Interface</h1>
+    <button id="connectButton">Connect to Serial Port</button>
+    <button id="sendButton" disabled>Send Data</button>
+    <button id="disconnectButton" disabled>Disconnect</button>
+    <div>
+        <input type="text" id="dataInput" placeholder="Enter data to send" disabled>
+    </div>
+    <div id="output">Serial Output:<br></div>
+
+    <script>
+        let port;
+        let reader;
+        let writer;
+        let keepReading = true;
+
+        const connectButton = document.getElementById('connectButton');
+        const sendButton = document.getElementById('sendButton');
+        const disconnectButton = document.getElementById('disconnectButton');
+        const dataInput = document.getElementById('dataInput');
+        const outputDiv = document.getElementById('output');
+
+        // Log messages to the output div
+        function log(message) {
+            outputDiv.innerHTML += message + '<br>';
+            outputDiv.scrollTop = outputDiv.scrollHeight;
+        }
+
+        // Connect to the serial port
+        async function connectSerial() {
+            try {
+                // Request a port from the user
+                port = await navigator.serial.requestPort();
+                // Open the port at 9600 baud
+                await port.open({ baudRate: 115200 });
+                log('Connected to serial port');
+
+                // Enable buttons
+                connectButton.disabled = true;
+                sendButton.disabled = false;
+                disconnectButton.disabled = false;
+                dataInput.disabled = false;
+
+                // Set up the writer for sending data
+                const encoder = new TextEncoderStream();
+                const outputStream = encoder.writable;
+                writer = outputStream.getWriter();
+                const writableStream = encoder.readable.pipeTo(port.writable);
+
+                // Set up the reader for receiving data
+                const decoder = new TextDecoderStream();
+                const inputStream = port.readable.pipeThrough(decoder);
+                reader = inputStream.getReader();
+                readSerial();
+            } catch (error) {
+                log('Error connecting: ' + error);
+            }
+        }
+
+        // Read data from the serial port
+        async function readSerial() {
+            while (port.readable && keepReading) {
+                try {
+                    const { value, done } = await reader.read();
+                    if (done) {
+                        log('Reader has been closed');
+                        break;
+                    }
+                    if (value) {
+                        log('Received: ' + value);
+                    }
+                } catch (error) {
+                    log('Error reading: ' + error);
+                    break;
+                }
+            }
+        }
+
+        // Send data to the serial port
+        async function sendData() {
+            const data = dataInput.value + '\n'; // Add newline for clarity
+            if (writer) {
+                try {
+                    await writer.write(data);
+                    log('Sent: ' + data.trim());
+                    dataInput.value = ''; // Clear input
+                } catch (error) {
+                    log('Error sending: ' + error);
+                }
+            }
+        }
+
+        // Disconnect from the serial port
+        async function disconnectSerial() {
+            keepReading = false;
+            if (reader) {
+                await reader.cancel();
+                reader = null;
+            }
+            if (writer) {
+                await writer.close();
+                writer = null;
+            }
+            if (port) {
+                await port.close();
+                port = null;
+                log('Disconnected from serial port');
+            }
+            // Reset buttons
+            connectButton.disabled = false;
+            sendButton.disabled = true;
+            disconnectButton.disabled = true;
+            dataInput.disabled = true;
+        }
+
+        // Event listeners
+        connectButton.addEventListener('click', connectSerial);
+        sendButton.addEventListener('click', sendData);
+        disconnectButton.addEventListener('click', disconnectSerial);
+        dataInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendData();
+        });
+    </script>
+</body>
+</html>

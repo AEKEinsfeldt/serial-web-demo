@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tabletop Game Serial Interface 1.1</title>
+    <title>Tabletop Game Serial Interface 1.1b</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; text-align: center; }
         button { padding: 10px 20px; margin: 5px; font-size: 16px; }
@@ -11,7 +11,7 @@
     </style>
 </head>
 <body>
-    <h1>Tabletop Game Serial Interface 1.1</h1>
+    <h1>Tabletop Game Serial Interface 1.1a</h1>
     <button id="connectButton">Connect to Serial Port</button>
     <button id="sendModuleInfo" disabled>Request Module Info</button>
     <button id="repositionModules" disabled>Reposition Modules</button>
@@ -100,7 +100,7 @@
         }
 
         async function sendCommand(command, subCommand = 0, data5 = 0) {
-            const packet = new Uint8Array([0x02, 7, command, 0, subCommand, data5, 0]);
+            const packet = new Uint8Array([0x02, 7, command, 1, subCommand, data5, data5, 0]);
             packet[1] = packet.length - 2; // Size
             packet[packet.length - 1] = calculateChecksum(packet.slice(0, -1));
             await writer.write(String.fromCharCode(...packet));

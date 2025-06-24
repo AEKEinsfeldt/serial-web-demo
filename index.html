@@ -100,7 +100,7 @@
         }
 
         async function sendCommand(command, subCommand = 0, data5 = 0) {
-            const packet = new Uint8Array([0x02, 7, command, 0, subCommand, 0, 0, 0, 0, data5, 0]);
+            const packet = new Uint8Array([0x02, 7, command, 0, subCommand, data5, 0]);
             packet[1] = packet.length - 2; // Size
             packet[packet.length - 1] = calculateChecksum(packet.slice(0, -1));
             await writer.write(String.fromCharCode(...packet));

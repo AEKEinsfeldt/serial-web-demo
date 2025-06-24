@@ -3,36 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Serial COM Port Web Interface</title>
+    <title>Tabletop Game Serial Interface</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            text-align: center;
-        }
-        button {
-            padding: 10px 20px;
-            margin: 5px;
-            font-size: 16px;
-        }
-        #output {
-            margin-top: 20px;
-            padding: 10px;
-            border: 1px solid #ccc;
-            height: 200px;
-            overflow-y: scroll;
-            text-align: left;
-        }
+        body { font-family: Arial, sans-serif; margin: 20px; text-align: center; }
+        button { padding: 10px 20px; margin: 5px; font-size: 16px; }
+        #output { margin-top: 20px; padding: 10px; border: 1px solid #ccc; height: 200px; overflow-y: scroll; text-align: left; }
     </style>
 </head>
 <body>
-    <h1>Serial COM Port Interface</h1>
+    <h1>Tabletop Game Serial Interface</h1>
     <button id="connectButton">Connect to Serial Port</button>
-    <button id="sendButton" disabled>Send Data</button>
+    <button id="sendModuleInfo" disabled>Request Module Info</button>
+    <button id="repositionModules" disabled>Reposition Modules</button>
     <button id="disconnectButton" disabled>Disconnect</button>
-    <div>
-        <input type="text" id="dataInput" placeholder="Enter data to send" disabled>
-    </div>
     <div id="output">Serial Output:<br></div>
 
     <script>
@@ -42,39 +25,31 @@
         let keepReading = true;
 
         const connectButton = document.getElementById('connectButton');
-        const sendButton = document.getElementById('sendButton');
+        const sendModuleInfo = document.getElementById('sendModuleInfo');
+        const repositionModules = document.getElementById('repositionModules');
         const disconnectButton = document.getElementById('disconnectButton');
-        const dataInput = document.getElementById('dataInput');
         const outputDiv = document.getElementById('output');
 
-        // Log messages to the output div
         function log(message) {
             outputDiv.innerHTML += message + '<br>';
             outputDiv.scrollTop = outputDiv.scrollHeight;
         }
 
-        // Connect to the serial port
         async function connectSerial() {
             try {
-                // Request a port from the user
                 port = await navigator.serial.requestPort();
-                // Open the port at 9600 baud
-                await port.open({ baudRate: 115200 });
+                await port.open({ baudRate: 115200, parity: 'none', stopBits: 2 });
                 log('Connected to serial port');
 
-                // Enable buttons
                 connectButton.disabled = true;
-                sendButton.disabled = false;
+                sendModuleInfo.disabled = false;
+                repositionModules.disabled = false;
                 disconnectButton.disabled = false;
-                dataInput.disabled = false;
 
-                // Set up the writer for sending data
                 const encoder = new TextEncoderStream();
-                const outputStream = encoder.writable;
-                writer = outputStream.getWriter();
-                const writableStream = encoder.readable.pipeTo(port.writable);
+                writer = encoder.writable.getWriter();
+                encoder.readable.pipeTo(port.writable);
 
-                // Set up the reader for receiving data
                 const decoder = new TextDecoderStream();
                 const inputStream = port.readable.pipeThrough(decoder);
                 reader = inputStream.getReader();
@@ -84,69 +59,70 @@
             }
         }
 
-        // Read data from the serial port
         async function readSerial() {
             while (port.readable && keepReading) {
-                try {
-                    const { value, done } = await reader.read();
-                    if (done) {
-                        log('Reader has been closed');
-                        break;
-                    }
-                    if (value) {
-                        log('Received: ' + value);
-                    }
-                } catch (error) {
-                    log('Error reading: ' + error);
+                const { value, done } = await reader.read();
+                if (done) {
+                    log('Reader closed');
                     break;
                 }
-            }
-        }
-
-        // Send data to the serial port
-        async function sendData() {
-            const data = dataInput.value + '\n'; // Add newline for clarity
-            if (writer) {
-                try {
-                    await writer.write(data);
-                    log('Sent: ' + data.trim());
-                    dataInput.value = ''; // Clear input
-                } catch (error) {
-                    log('Error sending: ' + error);
+                if (value) {
+                    parseProtocol(new Uint8Array(value.split('').map(c => c.charCodeAt(0))));
                 }
             }
         }
 
-        // Disconnect from the serial port
-        async function disconnectSerial() {
-            keepReading = false;
-            if (reader) {
-                await reader.cancel();
-                reader = null;
-            }
-            if (writer) {
-                await writer.close();
-                writer = null;
-            }
-            if (port) {
-                await port.close();
-                port = null;
-                log('Disconnected from serial port');
-            }
-            // Reset buttons
-            connectButton.disabled = false;
-            sendButton.disabled = true;
-            disconnectButton.disabled = true;
-            dataInput.disabled = true;
+        function calculateChecksum(data) {
+            let sum = 0;
+            for (let byte of data) sum += byte;
+            return (~sum + 1) & 0xFF; // 2's complement
         }
 
-        // Event listeners
+        function parseProtocol(data) {
+            if (data[0] !== 0x02 || data.length < 3) return;
+            const size = data[1];
+            if (data.length !== size + 2) return; // +2 for start and CKS
+            const cks = data[size + 1];
+            const calcCks = calculateChecksum(data.slice(0, -1));
+            if (cks !== calcCks) {
+                log('Checksum error');
+                return;
+            }
+            const command = data[2];
+            if (command === 0x22) {
+                const gameStatus = data[3];
+                const modx = data[4];
+                const mody = data[5];
+                const swrevMaj = data[6];
+                const swrevMin = data[7];
+                log(`Module Info: Game Status=${gameStatus}, Address=(${modx},${mody}), SW Rev=${swrevMaj}.${swrevMin}`);
+            }
+        }
+
+        async function sendCommand(command, subCommand = 0, data5 = 0) {
+            const packet = new Uint8Array([0x02, 7, command, 0, subCommand, 0, 0, 0, 0, data5, 0]);
+            packet[1] = packet.length - 2; // Size
+            packet[packet.length - 1] = calculateChecksum(packet.slice(0, -1));
+            await writer.write(String.fromCharCode(...packet));
+            log(`Sent command 0x${command.toString(16)}`);
+        }
+
+        async function disconnectSerial() {
+            keepReading = false;
+            if (reader) await reader.cancel();
+            if (writer) await writer.close();
+            if (port) await port.close();
+            log('Disconnected');
+            connectButton.disabled = false;
+            sendModuleInfo.disabled = true;
+            repositionModules.disabled = true;
+            disconnectButton.disabled = true;
+        }
+
         connectButton.addEventListener('click', connectSerial);
-        sendButton.addEventListener('click', sendData);
+        sendModuleInfo.addEventListener('click', () => sendCommand(0x20, 0x03, 254));
+        repositionModules.addEventListener('click', () => sendCommand(0x12));
         disconnectButton.addEventListener('click', disconnectSerial);
-        dataInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') sendData();
-        });
     </script>
 </body>
 </html>

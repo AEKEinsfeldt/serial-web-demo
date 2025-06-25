@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tabletop Game Serial Interface 1.51</title>
+    <title>Tabletop Game Serial Interface</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; text-align: center; }
         button { padding: 10px 20px; margin: 5px; font-size: 16px; }
@@ -16,7 +16,7 @@
     </style>
 </head>
 <body>
-    <h1>Tabletop Game Serial Interface 1.51234</h1>
+    <h1>Tabletop Game Serial Interface</h1>
     <button id="connectButton">Connect to Serial Port</button>
     <button id="sendModuleInfo" disabled>Request Module Info</button>
     <button id="repositionModules" disabled>Reposition Modules</button>
@@ -29,46 +29,30 @@
     </div>
 
     <script>
-        let port;
-        let reader;
-        let writer;
+        let port = null;
+        let reader = null;
+        let writer = null;
         let keepReading = true;
-        let sequenceNumber;
+        let sequenceNumber = 0;
         let buffer = new Uint8Array(0);
         let lastSentPacket = null;
         let gameMap = Array(8).fill().map(() => Array(8).fill(null));
         let isExtracting = false;
-        let lastResponseTime = 0;
 
-        const COMMAND_DELAY = 10; // Delay between commands in ms (tune if needed, responses in 2-3ms)
-        const RESPONSE_TIMEOUT = 50; // Timeout after last response in ms
-        const MAX_BUFFER_SIZE = 1024; // Cap buffer to prevent memory issues
-        const BATCH_SIZE = 4; // Commands per batch to balance throughput
+        const COMMAND_DELAY = 10; // Delay between commands in ms (tune if needed, aim for ~10ms)
 
         const connectButton = document.getElementById('connectButton');
-        const sendModuleInfo = document.getElementById('sendModuleInfo');
-        const repositionModules = document.getElementById('repositionModules');
+        const sendModuleInfoButton = document.getElementById('sendModuleInfo');
+        const repositionModulesButton = document.getElementById('repositionModules');
         const extractGameMapButton = document.getElementById('extractGameMap');
         const disconnectButton = document.getElementById('disconnectButton');
         const outputDiv = document.getElementById('output');
         const gameMapDiv = document.getElementById('gameMap');
 
-        function log(message, verbose = true) {
-            if (verbose || !isExtracting) {
-                outputDiv.innerHTML += `${new Date().toLocaleTimeString()}: ${message}<br>`;
-                outputDiv.scrollTop = outputDiv.scrollHeight;
-            }
+        function log(message) {
+            outputDiv.innerHTML += `<span>${new Date().toLocaleTimeString()}: ${message}</span><br>`;
+            outputDiv.scrollTop = outputDiv.scrollHeight;
         }
-
-        function debounce(func, wait) {
-            let timeout;
-            return function (...args) {
-                clearTimeout(timeout);
-                timeout = setTimeout(() => func.apply(this, args), wait);
-            };
-        }
-
-        const debouncedRenderGameMap = debounce(renderGameMap, 100);
 
         function renderGameMap() {
             gameMapDiv.innerHTML = '';
@@ -78,7 +62,7 @@
                     cell.className = 'map-cell';
                     const rev = gameMap[x][y];
                     if (rev) {
-                        cell.textContent = `${rev.major}.${rev.minor}`;
+                        cell.textContent = `${rev.major}.${rev.swrevMin}`;
                         cell.classList.add('present');
                     } else {
                         cell.textContent = '-';
@@ -101,8 +85,8 @@
                 log(`Initial sequence number: 0x${sequenceNumber.toString(16).padStart(2, '0')}`);
 
                 connectButton.disabled = true;
-                sendModuleInfo.disabled = false;
-                repositionModules.disabled = false;
+                sendModuleInfoButton.disabled = false;
+                repositionModulesButton.disabled = false;
                 extractGameMapButton.disabled = false;
                 disconnectButton.disabled = false;
 
@@ -127,16 +111,12 @@
                         break;
                     }
                     if (value) {
-                        log(`Received bytes: ${Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' ')}`, false);
+                        log(`Received bytes: ${Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
                         const newBuffer = new Uint8Array(buffer.length + value.length);
                         newBuffer.set(buffer);
                         newBuffer.set(value, buffer.length);
                         buffer = newBuffer;
-                        if (buffer.length > MAX_BUFFER_SIZE) {
-                            log('Buffer overflow, discarding oldest data');
-                            buffer = buffer.slice(buffer.length - MAX_BUFFER_SIZE / 2);
-                        }
-                        log(`Buffer state: ${Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' ')}`, false);
+                        log(`Buffer state: ${Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
                         while (buffer.length >= 2) {
                             let startIdx = buffer.findIndex(b => b === 0x02);
                             if (startIdx === -1) {
@@ -164,8 +144,8 @@
                             }
                             const packet = buffer.slice(0, size + 1);
                             buffer = buffer.slice(size + 1);
-                            log(`Processing packet: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`, false);
-                            log(`Remaining buffer: ${Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' ')}`, false);
+                            log(`Processing packet: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                            log(`Remaining buffer: ${Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
                             if (lastSentPacket && packet.length === lastSentPacket.length && packet.every((b, i) => b === lastSentPacket[i])) {
                                 log(`Echoed packet: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
                                 continue;
@@ -212,10 +192,8 @@
                         const swrevMin = data[8];
                         log(`Module Info: Game Status=${gameStatus}, Address=(${modx},${mody}), SW Rev=${swrevMaj}.${swrevMin}`);
                         if (modx >= 0 && modx < 8 && mody >= 0 && mody < 8) {
-                            gameMap[modx][mody] = { major: swrevMaj, minor: swrevMin };
+                            gameMap[modx][mody] = { major: swrevMaj, swrevMin: swrevMin };
                             log(`Updated gameMap at (${modx},${mody}) with SW Rev ${swrevMaj}.${swrevMin}`);
-                            debouncedRenderGameMap();
-                            lastResponseTime = Date.now();
                         } else {
                             log(`Invalid address (${modx},${mody}) ignored`);
                         }
@@ -263,35 +241,24 @@
             isExtracting = true;
             try {
                 log('Starting game map extraction...');
+                buffer = new Uint8Array(0); // Clear buffer
                 gameMap = Array(8).fill().map(() => Array(8).fill(null));
                 renderGameMap();
-                lastResponseTime = Date.now();
-                const queries = [];
                 for (let x = 0; x < 8; x++) {
                     for (let y = 0; y < 8; y++) {
-                        queries.push({ x, y });
-                    }
-                }
-                for (let i = 0; i < queries.length; i += BATCH_SIZE) {
-                    const batch = queries.slice(i, i + BATCH_SIZE);
-                    for (const { x, y } of batch) {
                         log(`Querying module at (${x}, ${y})`);
                         await sendCommand(7, 0x20, 0x03, x, y);
+                        await new Promise(resolve => setTimeout(resolve, COMMAND_DELAY));
                     }
-                    await new Promise(resolve => setTimeout(resolve, COMMAND_DELAY));
                 }
-                // Wait for remaining responses
-                while (Date.now() - lastResponseTime < RESPONSE_TIMEOUT) {
-                    await new Promise(resolve => setTimeout(resolve, 10));
-                }
+                await new Promise(resolve => setTimeout(resolve, 50)); // Wait for responses
                 log('Game map extraction complete');
+                renderGameMap();
             } catch (error) {
                 log(`Extraction error: ${error}`);
             } finally {
                 isExtracting = false;
                 lastSentPacket = null;
-                buffer = new Uint8Array(0);
-                renderGameMap();
             }
         }
 
@@ -312,15 +279,15 @@
                 log(`Disconnect error: ${error}`);
             }
             connectButton.disabled = false;
-            sendModuleInfo.disabled = true;
-            repositionModules.disabled = true;
+            sendModuleInfoButton.disabled = true;
+            repositionModulesButton.disabled = true;
             extractGameMapButton.disabled = true;
             disconnectButton.disabled = true;
         }
 
         connectButton.addEventListener('click', connectSerial);
-        sendModuleInfo.addEventListener('click', () => sendCommand(7, 0x20, 0x03, 254));
-        repositionModules.addEventListener('click', () => sendCommand(4, 0x12));
+        sendModuleInfoButton.addEventListener('click', () => sendCommand(7, 0x20, 0x03, 254));
+        repositionModulesButton.addEventListener('click', () => sendCommand(4, 0x12));
         extractGameMapButton.addEventListener('click', extractGameMap);
         disconnectButton.addEventListener('click', disconnectSerial);
     </script>

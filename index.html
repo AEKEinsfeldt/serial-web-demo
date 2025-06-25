@@ -3,20 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tabletop Game Serial Interface 1.5 </title>
+    <title>Tabletop Game Serial Interface 1.6</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; text-align: center; }
         button { padding: 10px 20px; margin: 5px; font-size: 16px; }
         #output { margin-top: 20px; padding: 10px; border: 1px solid #ccc; height: 200px; overflow-y: scroll; text-align: left; }
+        #gameMapContainer { margin-top: 20px; }
+        #gameMap { display: grid; grid-template-columns: repeat(8, 50px); gap: 2px; justify-content: center; }
+        .map-cell { width: 50px; height: 50px; border: 1px solid #999; display: flex; align-items: center; justify-content: center; font-size: 12px; background: #f0f0f0; }
+        .map-cell.present { background: #aaffaa; }
+        .map-cell.absent { background: #ffaaaa; }
     </style>
 </head>
 <body>
-    <h1>Tabletop Game Serial Interface 1.5 </h1>
+    <h1>Tabletop Game Serial Interface 1.6</h1>
     <button id="connectButton">Connect to Serial Port</button>
     <button id="sendModuleInfo" disabled>Request Module Info</button>
     <button id="repositionModules" disabled>Reposition Modules</button>
+    <button id="extractGameMap" disabled>Extract Game Map</button>
     <button id="disconnectButton" disabled>Disconnect</button>
     <div id="output">Serial Output:<br></div>
+    <div id="gameMapContainer">
+        <h2>Game Map (8x8)</h2>
+        <div id="gameMap"></div>
+    </div>
 
     <script>
         let port;
@@ -26,16 +36,40 @@
         let sequenceNumber;
         let buffer = new Uint8Array(0);
         let lastSentPacket = null;
+        let gameMap = Array(8).fill().map(() => Array(8).fill(null)); // 8x8 matrix for sw revisions
+
+        const RESPONSE_TIMEOUT = 20; // Timeout in ms for 0x22 response
 
         const connectButton = document.getElementById('connectButton');
         const sendModuleInfo = document.getElementById('sendModuleInfo');
         const repositionModules = document.getElementById('repositionModules');
+        const extractGameMapButton = document.getElementById('extractGameMap');
         const disconnectButton = document.getElementById('disconnectButton');
         const outputDiv = document.getElementById('output');
+        const gameMapDiv = document.getElementById('gameMap');
 
         function log(message) {
             outputDiv.innerHTML += `${new Date().toLocaleTimeString()}: ${message}<br>`;
             outputDiv.scrollTop = outputDiv.scrollHeight;
+        }
+
+        function renderGameMap() {
+            gameMapDiv.innerHTML = '';
+            for (let y = 0; y < 8; y++) {
+                for (let x = 0; x < 8; x++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'map-cell';
+                    const rev = gameMap[x][y];
+                    if (rev) {
+                        cell.textContent = `${rev.major}.${rev.minor}`;
+                        cell.classList.add('present');
+                    } else {
+                        cell.textContent = '-';
+                        cell.classList.add('absent');
+                    }
+                    gameMapDiv.appendChild(cell);
+                }
+            }
         }
 
         async function connectSerial() {
@@ -52,12 +86,15 @@
                 connectButton.disabled = true;
                 sendModuleInfo.disabled = false;
                 repositionModules.disabled = false;
+                extractGameMapButton.disabled = false;
                 disconnectButton.disabled = false;
 
                 writer = port.writable.getWriter();
                 reader = port.readable.getReader();
                 buffer = new Uint8Array(0);
                 lastSentPacket = null;
+                gameMap = Array(8).fill().map(() => Array(8).fill(null));
+                renderGameMap();
                 readSerial();
             } catch (error) {
                 log('Error connecting: ' + error);
@@ -74,15 +111,12 @@
                     }
                     if (value) {
                         log(`Received bytes: ${Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-                        // Append to buffer
                         const newBuffer = new Uint8Array(buffer.length + value.length);
                         newBuffer.set(buffer);
                         newBuffer.set(value, buffer.length);
                         buffer = newBuffer;
                         log(`Buffer state: ${Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-                        // Process messages
-                        while (buffer.length >= 2) { // Need 0x02 and size
-                            // Find next 0x02
+                        while (buffer.length >= 2) {
                             let startIdx = buffer.findIndex(b => b === 0x02);
                             if (startIdx === -1) {
                                 log('No start byte found, clearing buffer');
@@ -93,34 +127,28 @@
                                 log(`Skipped ${startIdx} invalid bytes: ${Array.from(buffer.slice(0, startIdx)).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
                                 buffer = buffer.slice(startIdx);
                             }
-                            // Need size byte
                             if (buffer.length < 2) {
                                 log(`Waiting for size byte`);
                                 break;
                             }
                             const size = buffer[1];
-                            // Validate size
                             if (size < 3 || size > 255) {
                                 log(`Invalid size 0x${size.toString(16).padStart(2, '0')}, skipping to next 0x02`);
                                 buffer = buffer.slice(1);
                                 continue;
                             }
-                            // Need complete packet
                             if (buffer.length < size + 1) {
                                 log(`Partial packet, waiting for ${size + 1 - buffer.length} more bytes`);
                                 break;
                             }
-                            // Extract exact packet (size + 1 bytes)
                             const packet = buffer.slice(0, size + 1);
                             buffer = buffer.slice(size + 1);
                             log(`Processing packet: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
                             log(`Remaining buffer: ${Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-                            // Check for echo
                             if (lastSentPacket && packet.length === lastSentPacket.length && packet.every((b, i) => b === lastSentPacket[i])) {
                                 log(`Echoed packet ignored: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
                                 continue;
                             }
-                            // Parse packet
                             parseProtocol(packet);
                         }
                     }
@@ -139,33 +167,36 @@
         function parseProtocol(data) {
             if (data[0] !== 0x02 || data.length < 3) {
                 log(`Invalid packet: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-                return;
+                return null;
             }
             const size = data[1];
             if (data.length !== size + 1) {
                 log(`Length mismatch: expected ${size + 1} bytes, got ${data.length}`);
-                return;
+                return null;
             }
             const cks = data[size];
             const calcCks = calculateChecksum(data.slice(0, size));
             if (cks !== calcCks) {
                 log(`Checksum error: expected 0x${calcCks.toString(16).padStart(2, '0')}, got 0x${cks.toString(16).padStart(2, '0')} for packet ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-                return;
+                return null;
             }
             const command = data[2];
             if (command === 0x22) {
-                if (size >= 8) { // Ensure enough bytes for Module Info
+                if (size >= 9) { // Ensure enough bytes for Module Info
                     const gameStatus = data[4];
                     const modx = data[5];
                     const mody = data[6];
                     const swrevMaj = data[7];
                     const swrevMin = data[8];
                     log(`Module Info: Game Status=${gameStatus}, Address=(${modx},${mody}), SW Rev=${swrevMaj}.${swrevMin}`);
+                    return { command, gameStatus, modx, mody, swrevMaj, swrevMin };
                 } else {
                     log(`Module Info packet too short: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                    return null;
                 }
             } else {
                 log(`Received command 0x${command.toString(16).padStart(2, '0')}: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                return null;
             }
         }
 
@@ -186,28 +217,17 @@
             sequenceNumber = (sequenceNumber + 1) & 0xFF;
         }
 
-        async function disconnectSerial() {
-            keepReading = false;
-            if (reader) {
-                await reader.cancel();
-                reader.releaseLock();
-            }
-            if (writer) {
-                await writer.close();
-                writer.releaseLock();
-            }
-            if (port) await port.close();
-            log('Disconnected');
-            connectButton.disabled = false;
-            sendModuleInfo.disabled = true;
-            repositionModules.disabled = true;
-            disconnectButton.disabled = true;
-        }
-
-        connectButton.addEventListener('click', connectSerial);
-        sendModuleInfo.addEventListener('click', () => sendCommand(7, 0x20, 0x03, 254));
-        repositionModules.addEventListener('click', () => sendCommand(4, 0x12));
-        disconnectButton.addEventListener('click', disconnectSerial);
-    </script>
-</body>
-</html>
+        async function extractGameMap() {
+            log('Starting game map extraction...');
+            // Clear matrix
+            gameMap = Array(8).fill().map(() => Array(8).fill(null));
+            renderGameMap();
+            // Scan 8x8 grid
+            for (let x = 0; x < 8; x++) {
+                for (let y = 0; y < 8; y++) {
+                    log(`Querying module at (${x}, ${y})`);
+                    // Send 0x20 command with X, Y
+                    await sendCommand(7, 0x20, 0x03, x, y);
+                    // Wait for echo
+                    let echoReceived = false;
+                    let

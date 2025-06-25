@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tabletop Game Serial Interface 1.3c1</title>
+    <title>Tabletop Game Serial Interface 1.4</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; text-align: center; }
         button { padding: 10px 20px; margin: 5px; font-size: 16px; }
@@ -11,7 +11,7 @@
     </style>
 </head>
 <body>
-    <h1>Tabletop Game Serial Interface 1.3 d</h1>
+    <h1>Tabletop Game Serial Interface 1.4</h1>
     <button id="connectButton">Connect to Serial Port</button>
     <button id="sendModuleInfo" disabled>Request Module Info</button>
     <button id="repositionModules" disabled>Reposition Modules</button>
@@ -24,8 +24,8 @@
         let writer;
         let keepReading = true;
         let sequenceNumber;
-        let buffer = new Uint8Array(0); // Buffer for incoming data
-        let lastSentPacket = null; // Track last sent packet for echo filtering
+        let buffer = new Uint8Array(0);
+        let lastSentPacket = null;
 
         const connectButton = document.getElementById('connectButton');
         const sendModuleInfo = document.getElementById('sendModuleInfo');
@@ -79,14 +79,12 @@
                         newBuffer.set(buffer);
                         newBuffer.set(value, buffer.length);
                         buffer = newBuffer;
-                        // Process all possible messages
-                        while (buffer.length >= 3) {
+                        log(`Buffer state: ${Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                        // Process messages
+                        while (buffer.length >= 2) { // Need at least 0x02 and size
                             // Find next 0x02
-                            let startIdx = 0;
-                            while (startIdx < buffer.length && buffer[startIdx] !== 0x02) {
-                                startIdx++;
-                            }
-                            if (startIdx >= buffer.length) {
+                            let startIdx = buffer.findIndex(b => b === 0x02);
+                            if (startIdx === -1) {
                                 log('No start byte found, clearing buffer');
                                 buffer = new Uint8Array(0);
                                 break;
@@ -95,37 +93,31 @@
                                 log(`Skipped ${startIdx} invalid bytes: ${Array.from(buffer.slice(0, startIdx)).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
                                 buffer = buffer.slice(startIdx);
                             }
-                            // Check for minimum packet size
-                            if (buffer.length < 3) {
-                                log(`Partial packet, waiting for ${3 - buffer.length} more bytes`);
+                            // Need size byte
+                            if (buffer.length < 2) {
+                                log(`Waiting for size byte`);
                                 break;
                             }
                             const size = buffer[1];
+                            // Need complete packet
                             if (buffer.length < size + 2) {
                                 log(`Partial packet, waiting for ${size + 2 - buffer.length} more bytes`);
                                 break;
                             }
-                            // Extract potential packet
+                            // Extract packet
                             const packet = buffer.slice(0, size + 2);
-                            // Check if packet matches last sent (echo)
+                            buffer = buffer.slice(size + 2);
+                            // Check for echo
                             if (lastSentPacket && packet.length === lastSentPacket.length && packet.every((b, i) => b === lastSentPacket[i])) {
                                 log(`Echoed packet ignored: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-                                buffer = buffer.slice(size + 2);
                                 continue;
                             }
                             // Parse packet
                             const result = parseProtocol(packet);
-                            buffer = buffer.slice(size + 2);
-                            // If checksum failed, search for next 0x02
                             if (!result.valid) {
-                                let nextStart = buffer.findIndex(b => b === 0x02);
-                                if (nextStart === -1) {
-                                    log('No valid start byte after checksum error, clearing buffer');
-                                    buffer = new Uint8Array(0);
-                                    break;
-                                }
-                                log(`Checksum error, skipping to next 0x02 at offset ${nextStart}`);
-                                buffer = buffer.slice(nextStart);
+                                // Search for next 0x02 in remaining buffer
+                                log(`Searching for next 0x02 after invalid packet`);
+                                continue; // Don’t clear buffer, keep processing
                             }
                         }
                     }
@@ -147,7 +139,10 @@
                 return { valid: false };
             }
             const size = data[1];
-            // Removed length check: data.length !== size + 2
+            if (data.length < size + 2) {
+                log(`Incomplete packet: expected ${size + 2} bytes, got ${data.length}`);
+                return { valid: false };
+            }
             const cks = data[size + 1];
             const calcCks = calculateChecksum(data.slice(0, -1));
             if (cks !== calcCks) {
@@ -156,12 +151,16 @@
             }
             const command = data[2];
             if (command === 0x22) {
-                const gameStatus = data[3];
-                const modx = data[4];
-                const mody = data[5];
-                const swrevMaj = data[6];
-                const swrevMin = data[7];
-                log(`Module Info: Game Status=${gameStatus}, Address=(${modx},${mody}), SW Rev=${swrevMaj}.${swrevMin}`);
+                if (size >= 8) { // Ensure enough bytes for Module Info
+                    const gameStatus = data[3];
+                    const modx = data[4];
+                    const mody = data[5];
+                    const swrevMaj = data[6];
+                    const swrevMin = data[7];
+                    log(`Module Info: Game Status=${gameStatus}, Address=(${modx},${mody}), SW Rev=${swrevMaj}.${swrevMin}`);
+                } else {
+                    log(`Module Info packet too short: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                }
             } else {
                 log(`Received command 0x${command.toString(16).padStart(2, '0')}: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
             }
@@ -180,7 +179,7 @@
             packet[tam] = calculateChecksum(packet.slice(0, tam));
             log(`Sending bytes: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
             await writer.write(packet);
-            lastSentPacket = packet; // Store for echo filtering
+            lastSentPacket = packet;
             log(`Sent command 0x${command.toString(16)}`);
             sequenceNumber = (sequenceNumber + 1) & 0xFF;
         }

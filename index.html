@@ -22,6 +22,11 @@
             overflow-x: hidden;
         }
 
+        body.rtl {
+            direction: rtl;
+            text-align: right;
+        }
+
         header {
             background: rgba(0, 0, 0, 0.7);
             backdrop-filter: blur(10px);
@@ -52,6 +57,22 @@
             font-size: 1.8rem;
             color: #00d4ff;
             text-shadow: 0 0 10px #00d4ff;
+        }
+
+        .language-switcher {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .language-switcher select {
+            background: #333;
+            color: #e0e0e0;
+            border: 1px solid #00d4ff;
+            border-radius: 5px;
+            padding: 0.5rem;
+            font-family: 'Roboto', sans-serif;
+            cursor: pointer;
         }
 
         .hero {
@@ -188,6 +209,7 @@
             button { width: 100%; }
             #gameMap { grid-template-columns: repeat(8, 40px); }
             .map-cell { width: 40px; height: 40px; font-size: 0.8rem; }
+            .language-switcher select { width: 100px; }
         }
     </style>
 </head>
@@ -195,29 +217,99 @@
     <header>
         <div class="logo">
             <div class="logo-img"></div>
-            <h1>Tabletop Game Interface</h1>
+            <h1 data-translate="appTitle">Tabletop Game Interface</h1>
+        </div>
+        <div class="language-switcher">
+            <select id="languageSelect">
+                <option value="en">English</option>
+                <option value="de">Deutsch</option>
+                <option value="pt">Português</option>
+            </select>
         </div>
     </header>
     <section class="hero">
-        <h2>Welcome to the Tabletop Command Center</h2>
-        <p>Connect your tabletop modules, map your game, and dive into the action!</p>
+        <h2 data-translate="heroTitle">Welcome to the Tabletop Command Center</h2>
+        <p data-translate="heroSubtitle">Connect your tabletop modules, map your game, and dive into the action!</p>
     </section>
     <section class="controls">
-        <button id="connectButton">Connect to Serial Port</button>
-        <button id="sendModuleInfo" disabled>Request Module Info</button>
-        <button id="repositionModules" disabled>Reposition Modules</button>
-        <button id="extractGameMap" disabled>Extract Game Map</button>
-        <button id="disconnectButton" disabled>Disconnect</button>
+        <button id="connectButton" data-translate="connectButton">Connect to Serial Port</button>
+        <button id="sendModuleInfo" disabled data-translate="sendModuleInfo">Request Module Info</button>
+        <button id="repositionModules" disabled data-translate="repositionModules">Reposition Modules</button>
+        <button id="extractGameMap" disabled data-translate="extractGameMap">Extract Game Map</button>
+        <button id="disconnectButton" disabled data-translate="disconnectButton">Disconnect</button>
     </section>
     <section class="game-map-section">
-        <h2>Game Map (8x8)</h2>
+        <h2 data-translate="gameMapTitle">Game Map (8x8)</h2>
         <div id="gameMap"></div>
     </section>
     <section class="output-section">
-        <div id="output">Serial Output:<br></div>
+        <div id="output"></div>
     </section>
 
     <script>
+        // Translation data for UI elements only
+        const translations = {
+            en: {
+                appTitle: 'Tabletop Game Interface',
+                heroTitle: 'Welcome to the Tabletop Command Center',
+                heroSubtitle: 'Connect your tabletop modules, map your game, and dive into the action!',
+                connectButton: 'Connect to Serial Port',
+                sendModuleInfo: 'Request Module Info',
+                repositionModules: 'Reposition Modules',
+                extractGameMap: 'Extract Game Map',
+                disconnectButton: 'Disconnect',
+                gameMapTitle: 'Game Map (8x8)'
+            },
+            de: {
+                appTitle: 'Tischspiel-Schnittstelle',
+                heroTitle: 'Willkommen im Tischspiel-Kontrollzentrum',
+                heroSubtitle: 'Verbinde deine Tischmodule, erstelle deine Spielkarte und tauche ins Spiel ein!',
+                connectButton: 'Mit seriellem Port verbinden',
+                sendModuleInfo: 'Modulinformationen anfordern',
+                repositionModules: 'Module neu positionieren',
+                extractGameMap: 'Spielkarte extrahieren',
+                disconnectButton: 'Trennen',
+                gameMapTitle: 'Spielkarte (8x8)'
+            },
+            pt: {
+                appTitle: 'Interface de Jogo de Tabuleiro',
+                heroTitle: 'Bem-vindo ao Centro de Comando de Tabuleiro',
+                heroSubtitle: 'Conecte seus módulos de tabuleiro, mapeie seu jogo e mergulhe na ação!',
+                connectButton: 'Conectar à Porta Serial',
+                sendModuleInfo: 'Solicitar Informações do Módulo',
+                repositionModules: 'Reposicionar Módulos',
+                extractGameMap: 'Extrair Mapa do Jogo',
+                disconnectButton: 'Desconectar',
+                gameMapTitle: 'Mapa do Jogo (8x8)'
+            }
+        };
+
+        // Language management
+        let currentLanguage = localStorage.getItem('language') || 'en';
+
+        function translate(key) {
+            return translations[currentLanguage][key] || translations.en[key] || key;
+        }
+
+        function refreshTranslations() {
+            document.querySelectorAll('[data-translate]').forEach(element => {
+                const key = element.getAttribute('data-translate');
+                element.textContent = translate(key);
+            });
+            document.body.classList.toggle('rtl', currentLanguage === 'ar');
+        }
+
+        document.getElementById('languageSelect').value = currentLanguage;
+        document.getElementById('languageSelect').addEventListener('change', (e) => {
+            currentLanguage = e.target.value;
+            localStorage.setItem('language', currentLanguage);
+            refreshTranslations();
+        });
+
+        // Initialize translations
+        document.addEventListener('DOMContentLoaded', refreshTranslations);
+
+        // Existing JavaScript logic
         let port = null;
         let reader = null;
         let writer = null;
@@ -228,7 +320,7 @@
         let gameMap = Array(8).fill().map(() => Array(8).fill(null));
         let isExtracting = false;
 
-        const COMMAND_DELAY = 10; // Delay between commands in ms (tune if needed, aim for ~10ms)
+        const COMMAND_DELAY = 10;
 
         const connectButton = document.getElementById('connectButton');
         const sendModuleInfoButton = document.getElementById('sendModuleInfo');
@@ -238,8 +330,12 @@
         const outputDiv = document.getElementById('output');
         const gameMapDiv = document.getElementById('gameMap');
 
-        function log(message) {
-            outputDiv.innerHTML += `<span>${new Date().toLocaleTimeString()}: ${message}</span><br>`;
+        function log(message, ...args) {
+            let text = message;
+            args.forEach((arg, i) => {
+                text = text.replace(`{${i}}`, arg);
+            });
+            outputDiv.innerHTML += `<span>${new Date().toLocaleTimeString()}: ${text}</span><br>`;
             outputDiv.scrollTop = outputDiv.scrollHeight;
         }
 
@@ -271,7 +367,7 @@
                 log('Connected to serial port');
 
                 sequenceNumber = Math.floor(Math.random() * 256);
-                log(`Initial sequence number: 0x${sequenceNumber.toString(16).padStart(2, '0')}`);
+                log('Initial sequence number: 0x{0}', sequenceNumber.toString(16).padStart(2, '0'));
 
                 connectButton.disabled = true;
                 sendModuleInfoButton.disabled = false;
@@ -287,7 +383,7 @@
                 renderGameMap();
                 readSerial();
             } catch (error) {
-                log(`Error connecting: ${error}`);
+                log('Error connecting: {0}', error.message);
             }
         }
 
@@ -300,12 +396,13 @@
                         break;
                     }
                     if (value) {
-                        log(`Received bytes: ${Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                        const hexBytes = Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                        log('Received bytes: {0}', hexBytes);
                         const newBuffer = new Uint8Array(buffer.length + value.length);
                         newBuffer.set(buffer);
                         newBuffer.set(value, buffer.length);
                         buffer = newBuffer;
-                        log(`Buffer state: ${Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                        log('Buffer state: {0}', Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' '));
                         while (buffer.length >= 2) {
                             let startIdx = buffer.findIndex(b => b === 0x02);
                             if (startIdx === -1) {
@@ -314,36 +411,37 @@
                                 break;
                             }
                             if (startIdx > 0) {
-                                log(`Skipped ${startIdx} invalid bytes: ${Array.from(buffer.slice(0, startIdx)).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                                log('Skipped {0} invalid bytes: {1}', startIdx, Array.from(buffer.slice(0, startIdx)).map(b => b.toString(16).padStart(2, '0')).join(' '));
                                 buffer = buffer.slice(startIdx);
                             }
                             if (buffer.length < 2) {
-                                log(`Waiting for size byte`);
+                                log('Waiting for size byte');
                                 break;
                             }
                             const size = buffer[1];
                             if (size < 3 || size > 255) {
-                                log(`Invalid size ${size.toString(16).padStart(2, '0')}, skipping to next 0x02`);
+                                log('Invalid size 0x{0}, skipping to next 0x02', size.toString(16).padStart(2, '0'));
                                 buffer = buffer.slice(1);
                                 continue;
                             }
                             if (buffer.length < size + 1) {
-                                log(`Partial packet ${size + 1 - buffer.length} more bytes, waiting`);
+                                log('Partial packet, waiting for {0} more bytes', size + 1 - buffer.length);
                                 break;
                             }
                             const packet = buffer.slice(0, size + 1);
                             buffer = buffer.slice(size + 1);
-                            log(`Processing packet: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-                            log(`Remaining buffer: ${Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                            const hexPacket = Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                            log('Processing packet: {0}', hexPacket);
+                            log('Remaining buffer: {0}', Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' '));
                             if (lastSentPacket && packet.length === lastSentPacket.length && packet.every((b, i) => b === lastSentPacket[i])) {
-                                log(`Echoed packet: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                                log('Echoed packet: {0}', hexPacket);
                                 continue;
                             }
                             parseProtocol(packet);
                         }
                     }
                 } catch (error) {
-                    log(`Read error: ${error}`);
+                    log('Read error: {0}', error.message);
                 }
             }
         }
@@ -351,24 +449,24 @@
         function calculateChecksum(data) {
             let sum = 0;
             for (let byte of data) sum += byte;
-            return (~sum + 1) & 0xFF; // 2's complement
+            return (~sum + 1) & 0xFF;
         }
 
         function parseProtocol(data) {
             try {
                 if (data[0] !== 0x02 || data.length < 3) {
-                    log(`Invalid packet: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                    log('Invalid packet: {0}', Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' '));
                     return null;
                 }
                 const size = data[1];
                 if (data.length !== size + 1) {
-                    log(`Length mismatch: expected ${size + 1} bytes, got ${data.length}`);
+                    log('Length mismatch: expected {0} bytes, got {1}', size + 1, data.length);
                     return null;
                 }
                 const cks = data[size];
                 const calcCks = calculateChecksum(data.slice(0, size));
                 if (cks !== calcCks) {
-                    log(`Checksum error: expected 0x${calcCks.toString(16).padStart(2, '0')}, got 0x${cks.toString(16).padStart(2, '0')} for packet ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                    log('Checksum error: expected 0x{0}, got 0x{1} for packet {2}', calcCks.toString(16).padStart(2, '0'), cks.toString(16).padStart(2, '0'), Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' '));
                     return null;
                 }
                 const command = data[2];
@@ -379,24 +477,24 @@
                         const mody = data[6];
                         const swrevMaj = data[7];
                         const swrevMin = data[8];
-                        log(`Module Info: Game Status=${gameStatus}, Address=(${modx},${mody}), SW Rev=${swrevMaj}.${swrevMin}`);
+                        log('Module Info: Game Status={0}, Address=({1},{2}), SW Rev={3}.{4}', gameStatus, modx, mody, swrevMaj, swrevMin);
                         if (modx >= 0 && modx < 8 && mody >= 0 && mody < 8) {
                             gameMap[modx][mody] = { major: swrevMaj, swrevMin: swrevMin };
-                            log(`Updated gameMap at (${modx},${mody}) with SW Rev ${swrevMaj}.${swrevMin}`);
+                            log('Updated gameMap at ({0},{1}) with SW Rev {2}.{3}', modx, mody, swrevMaj, swrevMin);
                         } else {
-                            log(`Invalid address (${modx},${mody}) ignored`);
+                            log('Invalid address ({0},{1}) ignored', modx, mody);
                         }
                         return { command, gameStatus, modx, mody, swrevMaj, swrevMin };
                     } else {
-                        log(`Module Info packet too short: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                        log('Module Info packet too short: {0}', Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' '));
                         return null;
                     }
                 } else {
-                    log(`Received command 0x${command.toString(16).padStart(2, '0')}: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                    log('Received command 0x{0}: {1}', command.toString(16).padStart(2, '0'), Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' '));
                     return null;
                 }
             } catch (error) {
-                log(`Parse error: ${error}`);
+                log('Parse error: {0}', error.message);
                 return null;
             }
         }
@@ -412,13 +510,13 @@
                 if (tam >= 6) packet[5] = data5;
                 if (tam >= 7) packet[6] = data6;
                 packet[tam] = calculateChecksum(packet.slice(0, tam));
-                log(`Sending bytes: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                log('Sending bytes: {0}', Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' '));
                 await writer.write(packet);
                 lastSentPacket = packet;
-                log(`Sent command 0x${command.toString(16)}`);
+                log('Sent command 0x{0}', command.toString(16));
                 sequenceNumber = (sequenceNumber + 1) & 0xFF;
             } catch (error) {
-                log(`Write error: ${error}`);
+                log('Write error: {0}', error.message);
             }
         }
 
@@ -430,21 +528,21 @@
             isExtracting = true;
             try {
                 log('Starting game map extraction...');
-                buffer = new Uint8Array(0); // Clear buffer
+                buffer = new Uint8Array(0);
                 gameMap = Array(8).fill().map(() => Array(8).fill(null));
                 renderGameMap();
                 for (let x = 0; x < 8; x++) {
                     for (let y = 0; y < 8; y++) {
-                        log(`Querying module at (${x}, ${y})`);
+                        log('Querying module at ({0}, {1})', x, y);
                         await sendCommand(7, 0x20, 0x03, x, y);
                         await new Promise(resolve => setTimeout(resolve, COMMAND_DELAY));
                     }
                 }
-                await new Promise(resolve => setTimeout(resolve, 50)); // Wait for responses
+                await new Promise(resolve => setTimeout(resolve, 50));
                 log('Game map extraction complete');
                 renderGameMap();
             } catch (error) {
-                log(`Extraction error: ${error}`);
+                log('Extraction error: {0}', error.message);
             } finally {
                 isExtracting = false;
                 lastSentPacket = null;
@@ -465,7 +563,7 @@
                 if (port) await port.close();
                 log('Disconnected');
             } catch (error) {
-                log(`Disconnect error: ${error}`);
+                log('Disconnect error: {0}', error.message);
             }
             connectButton.disabled = false;
             sendModuleInfoButton.disabled = true;
@@ -479,6 +577,9 @@
         repositionModulesButton.addEventListener('click', () => sendCommand(4, 0x12));
         extractGameMapButton.addEventListener('click', extractGameMap);
         disconnectButton.addEventListener('click', disconnectSerial);
+
+        // Initialize output
+        outputDiv.innerHTML = `<span>Serial Output:</span><br>`;
     </script>
 </body>
 </html>

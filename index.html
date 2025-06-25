@@ -11,7 +11,7 @@
     </style>
 </head>
 <body>
-    <h1>Tabletop Game Serial Interface 1.3 c2</h1>
+    <h1>Tabletop Game Serial Interface 1.3 d</h1>
     <button id="connectButton">Connect to Serial Port</button>
     <button id="sendModuleInfo" disabled>Request Module Info</button>
     <button id="repositionModules" disabled>Reposition Modules</button>
@@ -24,7 +24,8 @@
         let writer;
         let keepReading = true;
         let sequenceNumber;
-        let buffer = new Uint8Array(0); // Buffer for partial packets
+        let buffer = new Uint8Array(0); // Buffer for incoming data
+        let lastSentPacket = null; // Track last sent packet for echo filtering
 
         const connectButton = document.getElementById('connectButton');
         const sendModuleInfo = document.getElementById('sendModuleInfo');
@@ -55,7 +56,8 @@
 
                 writer = port.writable.getWriter();
                 reader = port.readable.getReader();
-                buffer = new Uint8Array(0); // Reset buffer
+                buffer = new Uint8Array(0);
+                lastSentPacket = null;
                 readSerial();
             } catch (error) {
                 log('Error connecting: ' + error);
@@ -71,28 +73,60 @@
                         break;
                     }
                     if (value) {
-                        // Log raw bytes received
                         log(`Received bytes: ${Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
                         // Append to buffer
                         const newBuffer = new Uint8Array(buffer.length + value.length);
                         newBuffer.set(buffer);
                         newBuffer.set(value, buffer.length);
                         buffer = newBuffer;
-                        // Process complete packets
+                        // Process all possible messages
                         while (buffer.length >= 3) {
-                            if (buffer[0] !== 0x02) {
-                                log(`Invalid start byte: 0x${buffer[0].toString(16).padStart(2, '0')}`);
-                                buffer = buffer.slice(1); // Skip invalid byte
-                                continue;
+                            // Find next 0x02
+                            let startIdx = 0;
+                            while (startIdx < buffer.length && buffer[startIdx] !== 0x02) {
+                                startIdx++;
+                            }
+                            if (startIdx >= buffer.length) {
+                                log('No start byte found, clearing buffer');
+                                buffer = new Uint8Array(0);
+                                break;
+                            }
+                            if (startIdx > 0) {
+                                log(`Skipped ${startIdx} invalid bytes: ${Array.from(buffer.slice(0, startIdx)).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                                buffer = buffer.slice(startIdx);
+                            }
+                            // Check for minimum packet size
+                            if (buffer.length < 3) {
+                                log(`Partial packet, waiting for ${3 - buffer.length} more bytes`);
+                                break;
                             }
                             const size = buffer[1];
                             if (buffer.length < size + 2) {
                                 log(`Partial packet, waiting for ${size + 2 - buffer.length} more bytes`);
                                 break;
                             }
+                            // Extract potential packet
                             const packet = buffer.slice(0, size + 2);
+                            // Check if packet matches last sent (echo)
+                            if (lastSentPacket && packet.length === lastSentPacket.length && packet.every((b, i) => b === lastSentPacket[i])) {
+                                log(`Echoed packet ignored: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                                buffer = buffer.slice(size + 2);
+                                continue;
+                            }
+                            // Parse packet
+                            const result = parseProtocol(packet);
                             buffer = buffer.slice(size + 2);
-                            parseProtocol(packet);
+                            // If checksum failed, search for next 0x02
+                            if (!result.valid) {
+                                let nextStart = buffer.findIndex(b => b === 0x02);
+                                if (nextStart === -1) {
+                                    log('No valid start byte after checksum error, clearing buffer');
+                                    buffer = new Uint8Array(0);
+                                    break;
+                                }
+                                log(`Checksum error, skipping to next 0x02 at offset ${nextStart}`);
+                                buffer = buffer.slice(nextStart);
+                            }
                         }
                     }
                 } catch (error) {
@@ -110,18 +144,15 @@
         function parseProtocol(data) {
             if (data[0] !== 0x02 || data.length < 3) {
                 log(`Invalid packet: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-                return;
+                return { valid: false };
             }
             const size = data[1];
-            if (data.length !== size + 2) {
-                log(`Length mismatch: expected ${size + 2}, got ${data.length}`);
-                return;
-            }
+            // Removed length check: data.length !== size + 2
             const cks = data[size + 1];
             const calcCks = calculateChecksum(data.slice(0, -1));
             if (cks !== calcCks) {
                 log(`Checksum error: expected 0x${calcCks.toString(16).padStart(2, '0')}, got 0x${cks.toString(16).padStart(2, '0')} for packet ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-                return;
+                return { valid: false };
             }
             const command = data[2];
             if (command === 0x22) {
@@ -134,6 +165,7 @@
             } else {
                 log(`Received command 0x${command.toString(16).padStart(2, '0')}: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
             }
+            return { valid: true };
         }
 
         async function sendCommand(tam, command, subCommand = 0, data5 = 0, data6 = 0) {
@@ -148,6 +180,7 @@
             packet[tam] = calculateChecksum(packet.slice(0, tam));
             log(`Sending bytes: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
             await writer.write(packet);
+            lastSentPacket = packet; // Store for echo filtering
             log(`Sent command 0x${command.toString(16)}`);
             sequenceNumber = (sequenceNumber + 1) & 0xFF;
         }

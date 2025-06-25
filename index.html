@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tabletop Game Serial Interface 1.5</title>
+    <title>Tabletop Game Serial Interface 1.51</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; text-align: center; }
         button { padding: 10px 20px; margin: 5px; font-size: 16px; }
@@ -16,7 +16,7 @@
     </style>
 </head>
 <body>
-    <h1>Tabletop Game Serial Interface 1.533322222</h1>
+    <h1>Tabletop Game Serial Interface 1.51234</h1>
     <button id="connectButton">Connect to Serial Port</button>
     <button id="sendModuleInfo" disabled>Request Module Info</button>
     <button id="repositionModules" disabled>Reposition Modules</button>
@@ -37,8 +37,13 @@
         let buffer = new Uint8Array(0);
         let lastSentPacket = null;
         let gameMap = Array(8).fill().map(() => Array(8).fill(null));
+        let isExtracting = false;
+        let lastResponseTime = 0;
 
-        const COMMAND_DELAY = 5; // Delay between commands in ms (tune if needed)
+        const COMMAND_DELAY = 10; // Delay between commands in ms (tune if needed, responses in 2-3ms)
+        const RESPONSE_TIMEOUT = 50; // Timeout after last response in ms
+        const MAX_BUFFER_SIZE = 1024; // Cap buffer to prevent memory issues
+        const BATCH_SIZE = 4; // Commands per batch to balance throughput
 
         const connectButton = document.getElementById('connectButton');
         const sendModuleInfo = document.getElementById('sendModuleInfo');
@@ -48,10 +53,22 @@
         const outputDiv = document.getElementById('output');
         const gameMapDiv = document.getElementById('gameMap');
 
-        function log(message) {
-            outputDiv.innerHTML += `${new Date().toLocaleTimeString()}: ${message}<br>`;
-            outputDiv.scrollTop = outputDiv.scrollHeight;
+        function log(message, verbose = true) {
+            if (verbose || !isExtracting) {
+                outputDiv.innerHTML += `${new Date().toLocaleTimeString()}: ${message}<br>`;
+                outputDiv.scrollTop = outputDiv.scrollHeight;
+            }
         }
+
+        function debounce(func, wait) {
+            let timeout;
+            return function (...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), wait);
+            };
+        }
+
+        const debouncedRenderGameMap = debounce(renderGameMap, 100);
 
         function renderGameMap() {
             gameMapDiv.innerHTML = '';
@@ -97,7 +114,7 @@
                 renderGameMap();
                 readSerial();
             } catch (error) {
-                log('Error connecting: ' + error);
+                log(`Error connecting: ${error}`);
             }
         }
 
@@ -110,12 +127,16 @@
                         break;
                     }
                     if (value) {
-                        log(`Received bytes: ${Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                        log(`Received bytes: ${Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' ')}`, false);
                         const newBuffer = new Uint8Array(buffer.length + value.length);
                         newBuffer.set(buffer);
                         newBuffer.set(value, buffer.length);
                         buffer = newBuffer;
-                        log(`Buffer state: ${Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                        if (buffer.length > MAX_BUFFER_SIZE) {
+                            log('Buffer overflow, discarding oldest data');
+                            buffer = buffer.slice(buffer.length - MAX_BUFFER_SIZE / 2);
+                        }
+                        log(`Buffer state: ${Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' ')}`, false);
                         while (buffer.length >= 2) {
                             let startIdx = buffer.findIndex(b => b === 0x02);
                             if (startIdx === -1) {
@@ -143,8 +164,8 @@
                             }
                             const packet = buffer.slice(0, size + 1);
                             buffer = buffer.slice(size + 1);
-                            log(`Processing packet: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-                            log(`Remaining buffer: ${Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                            log(`Processing packet: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`, false);
+                            log(`Remaining buffer: ${Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' ')}`, false);
                             if (lastSentPacket && packet.length === lastSentPacket.length && packet.every((b, i) => b === lastSentPacket[i])) {
                                 log(`Echoed packet: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
                                 continue;
@@ -165,94 +186,131 @@
         }
 
         function parseProtocol(data) {
-            if (data[0] !== 0x02 || data.length < 3) {
-                log(`Invalid packet: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-                return null;
-            }
-            const size = data[1];
-            if (data.length !== size + 1) {
-                log(`Length mismatch: expected ${size + 1} bytes, got ${data.length}`);
-                return null;
-            }
-            const cks = data[size];
-            const calcCks = calculateChecksum(data.slice(0, size));
-            if (cks !== calcCks) {
-                log(`Checksum error: expected 0x${calcCks.toString(16).padStart(2, '0')}, got 0x${cks.toString(16).padStart(2, '0')} for packet ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-                return null;
-            }
-            const command = data[2];
-            if (command === 0x22) {
-                if (size >= 10) {
-                    const gameStatus = data[4];
-                    const modx = data[5];
-                    const mody = data[6];
-                    const swrevMaj = data[7];
-                    const swrevMin = data[8];
-                    log(`Module Info: Game Status=${gameStatus}, Address=(${modx},${mody}), SW Rev=${swrevMaj}.${swrevMin}`);
-                    if (modx >= 0 && modx < 8 && mody >= 0 && mody < 8) {
-                        gameMap[modx][mody] = { major: swrevMaj, minor: swrevMin };
-                        log(`Updated gameMap at (${modx},${mody}) with SW Rev ${swrevMaj}.${swrevMin}`);
-                        renderGameMap();
-                    } else {
-                        log(`Invalid address (${modx},${mody}) ignored`);
-                    }
-                    return { command, gameStatus, modx, mody, swrevMaj, swrevMin };
-                } else {
-                    log(`Module Info packet too short: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+            try {
+                if (data[0] !== 0x02 || data.length < 3) {
+                    log(`Invalid packet: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
                     return null;
                 }
-            } else {
-                log(`Received command 0x${command.toString(16).padStart(2, '0')}: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                const size = data[1];
+                if (data.length !== size + 1) {
+                    log(`Length mismatch: expected ${size + 1} bytes, got ${data.length}`);
+                    return null;
+                }
+                const cks = data[size];
+                const calcCks = calculateChecksum(data.slice(0, size));
+                if (cks !== calcCks) {
+                    log(`Checksum error: expected 0x${calcCks.toString(16).padStart(2, '0')}, got 0x${cks.toString(16).padStart(2, '0')} for packet ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                    return null;
+                }
+                const command = data[2];
+                if (command === 0x22) {
+                    if (size >= 10) {
+                        const gameStatus = data[4];
+                        const modx = data[5];
+                        const mody = data[6];
+                        const swrevMaj = data[7];
+                        const swrevMin = data[8];
+                        log(`Module Info: Game Status=${gameStatus}, Address=(${modx},${mody}), SW Rev=${swrevMaj}.${swrevMin}`);
+                        if (modx >= 0 && modx < 8 && mody >= 0 && mody < 8) {
+                            gameMap[modx][mody] = { major: swrevMaj, minor: swrevMin };
+                            log(`Updated gameMap at (${modx},${mody}) with SW Rev ${swrevMaj}.${swrevMin}`);
+                            debouncedRenderGameMap();
+                            lastResponseTime = Date.now();
+                        } else {
+                            log(`Invalid address (${modx},${mody}) ignored`);
+                        }
+                        return { command, gameStatus, modx, mody, swrevMaj, swrevMin };
+                    } else {
+                        log(`Module Info packet too short: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                        return null;
+                    }
+                } else {
+                    log(`Received command 0x${command.toString(16).padStart(2, '0')}: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                    return null;
+                }
+            } catch (error) {
+                log(`Parse error: ${error}`);
                 return null;
             }
         }
 
         async function sendCommand(tam, command, subCommand = 0, data5 = 0, data6 = 0) {
-            let packet = new Uint8Array(tam + 1);
-            packet[0] = 0x02;
-            packet[1] = tam;
-            packet[2] = command;
-            packet[3] = sequenceNumber;
-            if (tam >= 5) packet[4] = subCommand;
-            if (tam >= 6) packet[5] = data5;
-            if (tam >= 7) packet[6] = data6;
-            packet[tam] = calculateChecksum(packet.slice(0, tam));
-            log(`Sending bytes: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-            await writer.write(packet);
-            lastSentPacket = packet;
-            log(`Sent command 0x${command.toString(16)}`);
-            sequenceNumber = (sequenceNumber + 1) & 0xFF;
+            try {
+                let packet = new Uint8Array(tam + 1);
+                packet[0] = 0x02;
+                packet[1] = tam;
+                packet[2] = command;
+                packet[3] = sequenceNumber;
+                if (tam >= 5) packet[4] = subCommand;
+                if (tam >= 6) packet[5] = data5;
+                if (tam >= 7) packet[6] = data6;
+                packet[tam] = calculateChecksum(packet.slice(0, tam));
+                log(`Sending bytes: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                await writer.write(packet);
+                lastSentPacket = packet;
+                log(`Sent command 0x${command.toString(16)}`);
+                sequenceNumber = (sequenceNumber + 1) & 0xFF;
+            } catch (error) {
+                log(`Write error: ${error}`);
+            }
         }
 
         async function extractGameMap() {
-            log('Starting game map extraction...');
-            gameMap = Array(8).fill().map(() => Array(8).fill(null));
-            renderGameMap();
-            for (let x = 0; x < 8; x++) {
-                for (let y = 0; y < 8; y++) {
-                    log(`Querying module at (${x}, ${y})`);
-                    await sendCommand(7, 0x20, 0x03, x, y);
+            if (isExtracting) {
+                log('Extraction already in progress, please wait');
+                return;
+            }
+            isExtracting = true;
+            try {
+                log('Starting game map extraction...');
+                gameMap = Array(8).fill().map(() => Array(8).fill(null));
+                renderGameMap();
+                lastResponseTime = Date.now();
+                const queries = [];
+                for (let x = 0; x < 8; x++) {
+                    for (let y = 0; y < 8; y++) {
+                        queries.push({ x, y });
+                    }
+                }
+                for (let i = 0; i < queries.length; i += BATCH_SIZE) {
+                    const batch = queries.slice(i, i + BATCH_SIZE);
+                    for (const { x, y } of batch) {
+                        log(`Querying module at (${x}, ${y})`);
+                        await sendCommand(7, 0x20, 0x03, x, y);
+                    }
                     await new Promise(resolve => setTimeout(resolve, COMMAND_DELAY));
                 }
+                // Wait for remaining responses
+                while (Date.now() - lastResponseTime < RESPONSE_TIMEOUT) {
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+                log('Game map extraction complete');
+            } catch (error) {
+                log(`Extraction error: ${error}`);
+            } finally {
+                isExtracting = false;
+                lastSentPacket = null;
+                buffer = new Uint8Array(0);
+                renderGameMap();
             }
-            // Wait briefly for any remaining responses
-            await new Promise(resolve => setTimeout(resolve, 100));
-            log('Game map extraction complete');
-            renderGameMap();
         }
 
         async function disconnectSerial() {
             keepReading = false;
-            if (reader) {
-                await reader.cancel();
-                reader.releaseLock();
+            try {
+                if (reader) {
+                    await reader.cancel();
+                    reader.releaseLock();
+                }
+                if (writer) {
+                    await writer.close();
+                    writer.releaseLock();
+                }
+                if (port) await port.close();
+                log('Disconnected');
+            } catch (error) {
+                log(`Disconnect error: ${error}`);
             }
-            if (writer) {
-                await writer.close();
-                writer.releaseLock();
-            }
-            if (port) await port.close();
-            log('Disconnected');
             connectButton.disabled = false;
             sendModuleInfo.disabled = true;
             repositionModules.disabled = true;

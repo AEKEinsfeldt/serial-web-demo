@@ -11,7 +11,7 @@
     </style>
 </head>
 <body>
-    <h1>Tabletop Game Serial Interface 1.2d  </h1>
+    <h1>Tabletop Game Serial Interface 1.2e  </h1>
     <button id="connectButton">Connect to Serial Port</button>
     <button id="sendModuleInfo" disabled>Request Module Info</button>
     <button id="repositionModules" disabled>Reposition Modules</button>
@@ -105,7 +105,7 @@ async function connectSerial() {
             const packet = new Uint8Array([0x02, tam, command, 3, subCommand, data5, data6, 0, 0]);
             packet.length = packet[1] + 1;
             packet[packet[1]] = calculateChecksum(packet.slice(0, packet[1]-1));
-            await writer.write(String.fromCharCode(...packet.slice(0, packet[1]+1)));
+            await writer.write(packet.slice(0, packet[1]+1)));
             log(`Sent command 0x${command.toString(16)}`);
         }
 

@@ -11,7 +11,7 @@
     </style>
 </head>
 <body>
-    <h1>Tabletop Game Serial Interface 1.1 f </h1>
+    <h1>Tabletop Game Serial Interface 1.1 g </h1>
     <button id="connectButton">Connect to Serial Port</button>
     <button id="sendModuleInfo" disabled>Request Module Info</button>
     <button id="repositionModules" disabled>Reposition Modules</button>
@@ -99,10 +99,9 @@
             }
         }
 
-        async function sendCommand(command, subCommand = 0, data5 = 0) {
-            const packet = new Uint8Array([0x02, 7, command, 2, subCommand, data5, data5, 0]);
-            packet[1] = packet.length - 1; // Size
-            packet[packet.length - 1] = calculateChecksum(packet.slice(0, packet[1]));
+        async function sendCommand(tam,command, subCommand = 0, data5 = 0, data6 = 0) {
+            const packet = new Uint8Array([0x02, tam, command, 2, subCommand, data5, data6, 0, 0]);
+            packet[packet.[1]] = calculateChecksum(packet.slice(0, packet[1]));
             await writer.write(String.fromCharCode(...packet.slice(0, packet[1]+1)));
             log(`Sent command 0x${command.toString(16)}`);
         }
@@ -120,8 +119,8 @@
         }
 
         connectButton.addEventListener('click', connectSerial);
-        sendModuleInfo.addEventListener('click', () => sendCommand(0x20, 0x03, 254));
-        repositionModules.addEventListener('click', () => sendCommand(0x12));
+        sendModuleInfo.addEventListener('click', () => sendCommand(7,0x20, 0x03, 254));
+        repositionModules.addEventListener('click', () => sendCommand(4,0x12));
         disconnectButton.addEventListener('click', disconnectSerial);
     </script>
 </body>

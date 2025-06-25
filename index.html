@@ -16,7 +16,7 @@
     </style>
 </head>
 <body>
-    <h1>Tabletop Game Serial Interface</h1>
+    <h1>Tabletop Game Serial Interface V0.1</h1>
     <button id="connectButton">Connect to Serial Port</button>
     <button id="sendModuleInfo" disabled>Request Module Info</button>
     <button id="repositionModules" disabled>Reposition Modules</button>
@@ -56,7 +56,7 @@
 
         function renderGameMap() {
             gameMapDiv.innerHTML = '';
-            for (let y = 0; y < 8; y++) {
+            for (let y = 7; y >= 0; y--) { // Render Y=0 at bottom, Y=7 at top
                 for (let x = 0; x < 8; x++) {
                     const cell = document.createElement('div');
                     cell.className = 'map-cell';
@@ -134,12 +134,12 @@
                             }
                             const size = buffer[1];
                             if (size < 3 || size > 255) {
-                                log(`Invalid size 0x${size.toString(16).padStart(2, '0')}, skipping to next 0x02`);
+                                log(`Invalid size ${size.toString(16).padStart(2, '0')}, skipping to next 0x02`);
                                 buffer = buffer.slice(1);
                                 continue;
                             }
                             if (buffer.length < size + 1) {
-                                log(`Partial packet, waiting for ${size + 1 - buffer.length} more bytes`);
+                                log(`Partial packet ${size + 1 - buffer.length} more bytes, waiting`);
                                 break;
                             }
                             const packet = buffer.slice(0, size + 1);

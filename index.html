@@ -250,7 +250,7 @@
         // Translation data for UI elements only
         const translations = {
             en: {
-                appTitle: 'Tabletop Game Interface',
+                appTitle: 'Tabletop Game Interface 1',
                 heroTitle: 'Welcome to the Tabletop Command Center',
                 heroSubtitle: 'Connect your tabletop modules, map your game, and dive into the action!',
                 connectButton: 'Connect to Serial Port',
@@ -261,7 +261,7 @@
                 gameMapTitle: 'Game Map (8x8)'
             },
             de: {
-                appTitle: 'Tischspiel-Schnittstelle',
+                appTitle: 'Tischspiel-Schnittstelle 1',
                 heroTitle: 'Willkommen im Tischspiel-Kontrollzentrum',
                 heroSubtitle: 'Verbinde deine Tischmodule, erstelle deine Spielkarte und tauche ins Spiel ein!',
                 connectButton: 'Mit seriellem Port verbinden',
@@ -272,7 +272,7 @@
                 gameMapTitle: 'Spielkarte (8x8)'
             },
             pt: {
-                appTitle: 'Interface de Jogo de Tabuleiro',
+                appTitle: 'Interface de Jogo de Tabuleiro 1',
                 heroTitle: 'Bem-vindo ao Centro de Comando de Tabuleiro',
                 heroSubtitle: 'Conecte seus módulos de tabuleiro, mapeie seu jogo e mergulhe na ação!',
                 connectButton: 'Conectar à Porta Serial',
@@ -320,7 +320,7 @@
         let gameMap = Array(8).fill().map(() => Array(8).fill(null));
         let isExtracting = false;
 
-        const COMMAND_DELAY = 10;
+        const COMMAND_DELAY = 20;
 
         const connectButton = document.getElementById('connectButton');
         const sendModuleInfoButton = document.getElementById('sendModuleInfo');
@@ -538,7 +538,7 @@
                         await new Promise(resolve => setTimeout(resolve, COMMAND_DELAY));
                     }
                 }
-                await new Promise(resolve => setTimeout(resolve, 50));
+                await new Promise(resolve => setTimeout(resolve, 30));
                 log('Game map extraction complete');
                 renderGameMap();
             } catch (error) {

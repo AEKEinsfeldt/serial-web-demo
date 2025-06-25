@@ -11,7 +11,7 @@
     </style>
 </head>
 <body>
-    <h1>Tabletop Game Serial Interface 1.1 h </h1>
+    <h1>Tabletop Game Serial Interface 1.2  </h1>
     <button id="connectButton">Connect to Serial Port</button>
     <button id="sendModuleInfo" disabled>Request Module Info</button>
     <button id="repositionModules" disabled>Reposition Modules</button>
@@ -35,29 +35,31 @@
             outputDiv.scrollTop = outputDiv.scrollHeight;
         }
 
-        async function connectSerial() {
-            try {
-                port = await navigator.serial.requestPort();
-                await port.open({ baudRate: 115200, parity: 'none', stopBits: 2 });
-                log('Connected to serial port');
+async function connectSerial() {
+    try {
+        log('Requesting port...');
+        port = await navigator.serial.requestPort();
+        log('Port selected, opening...');
+        await port.open({ baudRate: 115200, parity: 'none', stopBits: 2 });
+        log('Connected to serial port');
 
-                connectButton.disabled = true;
-                sendModuleInfo.disabled = false;
-                repositionModules.disabled = false;
-                disconnectButton.disabled = false;
+        connectButton.disabled = true;
+        sendModuleInfo.disabled = false;
+        repositionModules.disabled = false;
+        disconnectButton.disabled = false;
 
-                const encoder = new TextEncoderStream();
-                writer = encoder.writable.getWriter();
-                encoder.readable.pipeTo(port.writable);
+        const encoder = new TextEncoderStream();
+        writer = encoder.writable.getWriter();
+        encoder.readable.pipeTo(port.writable);
 
-                const decoder = new TextDecoderStream();
-                const inputStream = port.readable.pipeThrough(decoder);
-                reader = inputStream.getReader();
-                readSerial();
-            } catch (error) {
-                log('Error connecting: ' + error);
-            }
-        }
+        const decoder = new TextDecoderStream();
+        const inputStream = port.readable.pipeThrough(decoder);
+        reader = inputStream.getReader();
+        readSerial();
+    } catch (error) {
+        log('Error connecting: ' + error);
+    }
+}
 
         async function readSerial() {
             while (port.readable && keepReading) {

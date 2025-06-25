@@ -230,4 +230,76 @@
                     await sendCommand(7, 0x20, 0x03, x, y);
                     // Wait for echo
                     let echoReceived = false;
-                    let
+                    let startTime = Date.now();
+                    while (Date.now() - startTime < RESPONSE_TIMEOUT) {
+                        if (buffer.length >= 8) { // Echo packet size
+                            const packet = buffer.slice(0, 8);
+                            if (packet[0] === 0x02 && packet[1] === 0x07 && packet.every((b, i) => b === lastSentPacket[i])) {
+                                log(`Echo received for (${x}, ${y})`);
+                                buffer = buffer.slice(8);
+                                echoReceived = true;
+                                break;
+                            }
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 1));
+                    }
+                    if (!echoReceived) {
+                        log(`No echo received for (${x}, ${y}), proceeding`);
+                    }
+                    // Wait for 0x22 response or timeout
+                    startTime = Date.now();
+                    let responseReceived = false;
+                    while (Date.now() - startTime < RESPONSE_TIMEOUT) {
+                        if (buffer.length >= 9) { // Minimum 0x22 packet size
+                            const packet = buffer.slice(0, buffer[1] + 1);
+                            const result = parseProtocol(packet);
+                            if (result && result.command === 0x22) {
+                                buffer = buffer.slice(packet.length);
+                                if (result.modx === x && result.mody === y) {
+                                    gameMap[x][y] = { major: result.swrevMaj, minor: result.swrevMin };
+                                    log(`Stored SW Rev ${result.swrevMaj}.${result.swrevMin} at (${x}, ${y})`);
+                                    responseReceived = true;
+                                }
+                                renderGameMap();
+                                break;
+                            }
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 1));
+                    }
+                    if (!responseReceived) {
+                        log(`No 0x22 response for (${x}, ${y}), marking absent`);
+                        gameMap[x][y] = null;
+                        renderGameMap();
+                    }
+                }
+            }
+            log('Game map extraction complete');
+        }
+
+        async function disconnectSerial() {
+            keepReading = false;
+            if (reader) {
+                await reader.cancel();
+                reader.releaseLock();
+            }
+            if (writer) {
+                await writer.close();
+                writer.releaseLock();
+            }
+            if (port) await port.close();
+            log('Disconnected');
+            connectButton.disabled = false;
+            sendModuleInfo.disabled = true;
+            repositionModules.disabled = true;
+            extractGameMapButton.disabled = true;
+            disconnectButton.disabled = true;
+        }
+
+        connectButton.addEventListener('click', connectSerial);
+        sendModuleInfo.addEventListener('click', () => sendCommand(7, 0x20, 0x03, 254));
+        repositionModules.addEventListener('click', () => sendCommand(4, 0x12));
+        extractGameMapButton.addEventListener('click', extractGameMap);
+        disconnectButton.addEventListener('click', disconnectSerial);
+    </script>
+</body>
+</html>

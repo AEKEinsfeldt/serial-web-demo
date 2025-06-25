@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tabletop Game Serial Interface 1.3b</title>
+    <title>Tabletop Game Serial Interface 1.3c1</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; text-align: center; }
         button { padding: 10px 20px; margin: 5px; font-size: 16px; }
@@ -11,7 +11,7 @@
     </style>
 </head>
 <body>
-    <h1>Tabletop Game Serial Interface 1.3c1</h1>
+    <h1>Tabletop Game Serial Interface 1.3 c2</h1>
     <button id="connectButton">Connect to Serial Port</button>
     <button id="sendModuleInfo" disabled>Request Module Info</button>
     <button id="repositionModules" disabled>Reposition Modules</button>
@@ -23,7 +23,8 @@
         let reader;
         let writer;
         let keepReading = true;
-        let sequenceNumber; // Track sequence number
+        let sequenceNumber;
+        let buffer = new Uint8Array(0); // Buffer for partial packets
 
         const connectButton = document.getElementById('connectButton');
         const sendModuleInfo = document.getElementById('sendModuleInfo');
@@ -32,7 +33,7 @@
         const outputDiv = document.getElementById('output');
 
         function log(message) {
-            outputDiv.innerHTML += message + '<br>';
+            outputDiv.innerHTML += `${new Date().toLocaleTimeString()}: ${message}<br>`;
             outputDiv.scrollTop = outputDiv.scrollHeight;
         }
 
@@ -41,10 +42,9 @@
                 log('Requesting port...');
                 port = await navigator.serial.requestPort();
                 log('Port selected, opening...');
-                await port.open({ baudRate: 115200, parity: 'none', stopBits: 2 });
+                await port.open({ baudRate: 115200, parity: 'none', stopBits: 2, dataBits: 8, flowControl: 'none' });
                 log('Connected to serial port');
 
-                // Initialize random sequence number (0x00 to 0xFF)
                 sequenceNumber = Math.floor(Math.random() * 256);
                 log(`Initial sequence number: 0x${sequenceNumber.toString(16).padStart(2, '0')}`);
 
@@ -55,6 +55,7 @@
 
                 writer = port.writable.getWriter();
                 reader = port.readable.getReader();
+                buffer = new Uint8Array(0); // Reset buffer
                 readSerial();
             } catch (error) {
                 log('Error connecting: ' + error);
@@ -63,13 +64,39 @@
 
         async function readSerial() {
             while (port.readable && keepReading) {
-                const { value, done } = await reader.read();
-                if (done) {
-                    log('Reader closed');
-                    break;
-                }
-                if (value) {
-                    parseProtocol(value); // value is Uint8Array
+                try {
+                    const { value, done } = await reader.read();
+                    if (done) {
+                        log('Reader closed');
+                        break;
+                    }
+                    if (value) {
+                        // Log raw bytes received
+                        log(`Received bytes: ${Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                        // Append to buffer
+                        const newBuffer = new Uint8Array(buffer.length + value.length);
+                        newBuffer.set(buffer);
+                        newBuffer.set(value, buffer.length);
+                        buffer = newBuffer;
+                        // Process complete packets
+                        while (buffer.length >= 3) {
+                            if (buffer[0] !== 0x02) {
+                                log(`Invalid start byte: 0x${buffer[0].toString(16).padStart(2, '0')}`);
+                                buffer = buffer.slice(1); // Skip invalid byte
+                                continue;
+                            }
+                            const size = buffer[1];
+                            if (buffer.length < size + 2) {
+                                log(`Partial packet, waiting for ${size + 2 - buffer.length} more bytes`);
+                                break;
+                            }
+                            const packet = buffer.slice(0, size + 2);
+                            buffer = buffer.slice(size + 2);
+                            parseProtocol(packet);
+                        }
+                    }
+                } catch (error) {
+                    log(`Read error: ${error}`);
                 }
             }
         }
@@ -81,13 +108,19 @@
         }
 
         function parseProtocol(data) {
-            if (data[0] !== 0x02 || data.length < 3) return;
+            if (data[0] !== 0x02 || data.length < 3) {
+                log(`Invalid packet: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                return;
+            }
             const size = data[1];
-            if (data.length !== size + 2) return; // +2 for start and CKS
+            if (data.length !== size + 2) {
+                log(`Length mismatch: expected ${size + 2}, got ${data.length}`);
+                return;
+            }
             const cks = data[size + 1];
             const calcCks = calculateChecksum(data.slice(0, -1));
             if (cks !== calcCks) {
-                log('Checksum error');
+                log(`Checksum error: expected 0x${calcCks.toString(16).padStart(2, '0')}, got 0x${cks.toString(16).padStart(2, '0')} for packet ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
                 return;
             }
             const command = data[2];
@@ -98,15 +131,17 @@
                 const swrevMaj = data[6];
                 const swrevMin = data[7];
                 log(`Module Info: Game Status=${gameStatus}, Address=(${modx},${mody}), SW Rev=${swrevMaj}.${swrevMin}`);
+            } else {
+                log(`Received command 0x${command.toString(16).padStart(2, '0')}: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
             }
         }
 
         async function sendCommand(tam, command, subCommand = 0, data5 = 0, data6 = 0) {
-            let packet = new Uint8Array(tam + 1); // Size tam + 1
+            let packet = new Uint8Array(tam + 1);
             packet[0] = 0x02;
             packet[1] = tam;
             packet[2] = command;
-            packet[3] = sequenceNumber; // Use current sequence number
+            packet[3] = sequenceNumber;
             if (tam >= 5) packet[4] = subCommand;
             if (tam >= 6) packet[5] = data5;
             if (tam >= 7) packet[6] = data6;
@@ -114,7 +149,6 @@
             log(`Sending bytes: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
             await writer.write(packet);
             log(`Sent command 0x${command.toString(16)}`);
-            // Increment sequence number, wrap at 0xFF
             sequenceNumber = (sequenceNumber + 1) & 0xFF;
         }
 
@@ -141,6 +175,5 @@
         repositionModules.addEventListener('click', () => sendCommand(4, 0x12));
         disconnectButton.addEventListener('click', disconnectSerial);
     </script>
-</body>
 </body>
 </html>

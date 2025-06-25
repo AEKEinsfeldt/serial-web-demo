@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tabletop Game Serial Interface 1.344</title>
+    <title>Tabletop Game Serial Interface 1.3c1</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; text-align: center; }
         button { padding: 10px 20px; margin: 5px; font-size: 16px; }
@@ -11,7 +11,7 @@
     </style>
 </head>
 <body>
-    <h1>Tabletop Game Serial Interface 1.344</h1>
+    <h1>Tabletop Game Serial Interface 1.3c1</h1>
     <button id="connectButton">Connect to Serial Port</button>
     <button id="sendModuleInfo" disabled>Request Module Info</button>
     <button id="repositionModules" disabled>Reposition Modules</button>
@@ -106,13 +106,13 @@
                                 continue;
                             }
                             // Need complete packet
-                            if (buffer.length < size + 2) {
-                                log(`Partial packet, waiting for ${size + 2 - buffer.length} more bytes`);
+                            if (buffer.length < size + 1) {
+                                log(`Partial packet, waiting for ${size + 1 - buffer.length} more bytes`);
                                 break;
                             }
-                            // Extract exact packet
-                            const packet = buffer.slice(0, size + 2);
-                            buffer = buffer.slice(size + 2);
+                            // Extract exact packet (size + 1 bytes)
+                            const packet = buffer.slice(0, size + 1);
+                            buffer = buffer.slice(size + 1);
                             log(`Processing packet: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
                             log(`Remaining buffer: ${Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
                             // Check for echo
@@ -142,12 +142,12 @@
                 return;
             }
             const size = data[1];
-            if (data.length !== size + 2) {
-                log(`Length mismatch: expected ${size + 2} bytes, got ${data.length}`);
+            if (data.length !== size + 1) {
+                log(`Length mismatch: expected ${size + 1} bytes, got ${data.length}`);
                 return;
             }
-            const cks = data[size + 1];
-            const calcCks = calculateChecksum(data.slice(0, size + 1));
+            const cks = data[size];
+            const calcCks = calculateChecksum(data.slice(0, size));
             if (cks !== calcCks) {
                 log(`Checksum error: expected 0x${calcCks.toString(16).padStart(2, '0')}, got 0x${cks.toString(16).padStart(2, '0')} for packet ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
                 return;

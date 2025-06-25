@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tabletop Game Serial Interface 1.4</title>
+    <title>Tabletop Game Serial Interface 1.344</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; text-align: center; }
         button { padding: 10px 20px; margin: 5px; font-size: 16px; }
@@ -11,7 +11,7 @@
     </style>
 </head>
 <body>
-    <h1>Tabletop Game Serial Interface 1.4</h1>
+    <h1>Tabletop Game Serial Interface 1.344</h1>
     <button id="connectButton">Connect to Serial Port</button>
     <button id="sendModuleInfo" disabled>Request Module Info</button>
     <button id="repositionModules" disabled>Reposition Modules</button>
@@ -81,7 +81,7 @@
                         buffer = newBuffer;
                         log(`Buffer state: ${Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
                         // Process messages
-                        while (buffer.length >= 2) { // Need at least 0x02 and size
+                        while (buffer.length >= 2) { // Need 0x02 and size
                             // Find next 0x02
                             let startIdx = buffer.findIndex(b => b === 0x02);
                             if (startIdx === -1) {
@@ -99,26 +99,29 @@
                                 break;
                             }
                             const size = buffer[1];
+                            // Validate size
+                            if (size < 3 || size > 255) {
+                                log(`Invalid size 0x${size.toString(16).padStart(2, '0')}, skipping to next 0x02`);
+                                buffer = buffer.slice(1);
+                                continue;
+                            }
                             // Need complete packet
                             if (buffer.length < size + 2) {
                                 log(`Partial packet, waiting for ${size + 2 - buffer.length} more bytes`);
                                 break;
                             }
-                            // Extract packet
+                            // Extract exact packet
                             const packet = buffer.slice(0, size + 2);
                             buffer = buffer.slice(size + 2);
+                            log(`Processing packet: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                            log(`Remaining buffer: ${Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
                             // Check for echo
                             if (lastSentPacket && packet.length === lastSentPacket.length && packet.every((b, i) => b === lastSentPacket[i])) {
                                 log(`Echoed packet ignored: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
                                 continue;
                             }
                             // Parse packet
-                            const result = parseProtocol(packet);
-                            if (!result.valid) {
-                                // Search for next 0x02 in remaining buffer
-                                log(`Searching for next 0x02 after invalid packet`);
-                                continue; // Don’t clear buffer, keep processing
-                            }
+                            parseProtocol(packet);
                         }
                     }
                 } catch (error) {
@@ -136,18 +139,18 @@
         function parseProtocol(data) {
             if (data[0] !== 0x02 || data.length < 3) {
                 log(`Invalid packet: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-                return { valid: false };
+                return;
             }
             const size = data[1];
-            if (data.length < size + 2) {
-                log(`Incomplete packet: expected ${size + 2} bytes, got ${data.length}`);
-                return { valid: false };
+            if (data.length !== size + 2) {
+                log(`Length mismatch: expected ${size + 2} bytes, got ${data.length}`);
+                return;
             }
             const cks = data[size + 1];
-            const calcCks = calculateChecksum(data.slice(0, -1));
+            const calcCks = calculateChecksum(data.slice(0, size + 1));
             if (cks !== calcCks) {
                 log(`Checksum error: expected 0x${calcCks.toString(16).padStart(2, '0')}, got 0x${cks.toString(16).padStart(2, '0')} for packet ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-                return { valid: false };
+                return;
             }
             const command = data[2];
             if (command === 0x22) {
@@ -164,7 +167,6 @@
             } else {
                 log(`Received command 0x${command.toString(16).padStart(2, '0')}: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
             }
-            return { valid: true };
         }
 
         async function sendCommand(tam, command, subCommand = 0, data5 = 0, data6 = 0) {

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tabletop Game Serial Interface 1.3c1</title>
+    <title>Tabletop Game Serial Interface 1.5 </title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; text-align: center; }
         button { padding: 10px 20px; margin: 5px; font-size: 16px; }
@@ -11,7 +11,7 @@
     </style>
 </head>
 <body>
-    <h1>Tabletop Game Serial Interface 1.3c1</h1>
+    <h1>Tabletop Game Serial Interface 1.5 </h1>
     <button id="connectButton">Connect to Serial Port</button>
     <button id="sendModuleInfo" disabled>Request Module Info</button>
     <button id="repositionModules" disabled>Reposition Modules</button>
@@ -155,11 +155,11 @@
             const command = data[2];
             if (command === 0x22) {
                 if (size >= 8) { // Ensure enough bytes for Module Info
-                    const gameStatus = data[3];
-                    const modx = data[4];
-                    const mody = data[5];
-                    const swrevMaj = data[6];
-                    const swrevMin = data[7];
+                    const gameStatus = data[4];
+                    const modx = data[5];
+                    const mody = data[6];
+                    const swrevMaj = data[7];
+                    const swrevMin = data[8];
                     log(`Module Info: Game Status=${gameStatus}, Address=(${modx},${mody}), SW Rev=${swrevMaj}.${swrevMin}`);
                 } else {
                     log(`Module Info packet too short: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);

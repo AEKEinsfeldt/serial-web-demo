@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tabletop Game Serial Interface 1.5</title>
+    <title>Tabletop Game Serial Interface 1.555</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; text-align: center; }
         button { padding: 10px 20px; margin: 5px; font-size: 16px; }
@@ -16,7 +16,7 @@
     </style>
 </head>
 <body>
-    <h1>Tabletop Game Serial Interface 1.5</h1>
+    <h1>Tabletop Game Serial Interface 1.55555</h1>
     <button id="connectButton">Connect to Serial Port</button>
     <button id="sendModuleInfo" disabled>Request Module Info</button>
     <button id="repositionModules" disabled>Reposition Modules</button>
@@ -37,8 +37,12 @@
         let buffer = new Uint8Array(0);
         let lastSentPacket = null;
         let gameMap = Array(8).fill().map(() => Array(8).fill(null));
+        let echoResolve = null;
+        let responseResolve = null;
+        let currentX = null;
+        let currentY = null;
 
-        const RESPONSE_TIMEOUT = 50; // Timeout in ms (tune if needed, responses arrive in 2-3ms)
+        const RESPONSE_TIMEOUT = 10; // Timeout in ms (responses arrive in 2-3ms)
 
         const connectButton = document.getElementById('connectButton');
         const sendModuleInfo = document.getElementById('sendModuleInfo');
@@ -145,7 +149,19 @@
                             buffer = buffer.slice(size + 1);
                             log(`Processing packet: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
                             log(`Remaining buffer: ${Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-                            parseProtocol(packet);
+                            if (lastSentPacket && packet.length === lastSentPacket.length && packet.every((b, i) => b === lastSentPacket[i])) {
+                                log(`Echoed packet: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+                                if (echoResolve) {
+                                    echoResolve(true);
+                                    echoResolve = null;
+                                }
+                                continue;
+                            }
+                            const result = parseProtocol(packet);
+                            if (result && result.command === 0x22 && responseResolve) {
+                                responseResolve(result);
+                                responseResolve = null;
+                            }
                         }
                     }
                 } catch (error) {
@@ -213,32 +229,36 @@
             sequenceNumber = (sequenceNumber + 1) & 0xFF;
         }
 
-        async function waitForPacket(isEcho, x, y, timeout) {
-            const startTime = Date.now();
-            while (Date.now() - startTime < timeout) {
-                if (buffer.length >= (isEcho ? 8 : 10)) {
-                    const size = buffer[1];
-                    if (buffer[0] === 0x02 && buffer.length >= size + 1) {
-                        const packet = buffer.slice(0, size + 1);
-                        if (isEcho && packet.length === 8 && packet.every((b, i) => b === lastSentPacket[i])) {
-                            buffer = buffer.slice(size + 1);
-                            log(`Echo received for (${x}, ${y}): ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-                            return true;
-                        } else if (!isEcho) {
-                            const result = parseProtocol(packet);
-                            if (result && result.command === 0x22 && result.modx === x && result.mody === y) {
-                                buffer = buffer.slice(size + 1);
-                                return result;
-                            }
-                        }
-                        buffer = buffer.slice(size + 1); // Skip invalid packet
-                        log(`Skipped packet in waitForPacket: ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+        async function waitForEcho(x, y) {
+            return new Promise((resolve) => {
+                echoResolve = resolve;
+                setTimeout(() => {
+                    if (echoResolve) {
+                        log(`Timeout waiting for echo for (${x}, ${y})`);
+                        echoResolve = null;
+                        resolve(false);
                     }
-                }
-                await new Promise(resolve => setTimeout(resolve, 1));
-            }
-            log(`Timeout waiting for ${isEcho ? 'echo' : '0x22 response'} for (${x}, ${y})`);
-            return null;
+                }, RESPONSE_TIMEOUT);
+            });
+        }
+
+        async function waitForResponse(x, y) {
+            return new Promise((resolve) => {
+                responseResolve = (result) => {
+                    if (result.modx === x && result.mody === y) {
+                        resolve(result);
+                    } else {
+                        resolve(null); // Ignore mismatched responses
+                    }
+                };
+                setTimeout(() => {
+                    if (responseResolve) {
+                        log(`Timeout waiting for 0x22 response for (${x}, ${y})`);
+                        responseResolve = null;
+                        resolve(null);
+                    }
+                }, RESPONSE_TIMEOUT);
+            });
         }
 
         async function extractGameMap() {
@@ -248,14 +268,14 @@
             for (let x = 0; x < 8; x++) {
                 for (let y = 0; y < 8; y++) {
                     log(`Querying module at (${x}, ${y})`);
+                    currentX = x;
+                    currentY = y;
                     await sendCommand(7, 0x20, 0x03, x, y);
-                    // Wait for echo
-                    const echoReceived = await waitForPacket(true, x, y, RESPONSE_TIMEOUT);
+                    const echoReceived = await waitForEcho(x, y);
                     if (!echoReceived) {
                         log(`No echo received for (${x}, ${y})`);
                     }
-                    // Wait for 0x22 response
-                    const response = await waitForPacket(false, x, y, RESPONSE_TIMEOUT);
+                    const response = await waitForResponse(x, y);
                     if (response) {
                         gameMap[x][y] = { major: response.swrevMaj, minor: response.swrevMin };
                         log(`Stored SW Rev ${response.swrevMaj}.${response.swrevMin} at (${x}, ${y})`);
@@ -266,6 +286,8 @@
                     renderGameMap();
                 }
             }
+            currentX = null;
+            currentY = null;
             log('Game map extraction complete');
         }
 
